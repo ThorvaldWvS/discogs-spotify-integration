@@ -1,2 +1,1 @@
-# discogs-spotify-integration
-A repository for integrating Discogs collection with Spotify playlist
+This repository is empty. Any task executed on it should be considered a new capability and needs to be created.
