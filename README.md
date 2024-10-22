@@ -42,8 +42,17 @@ This project allows you to scrape your Discogs collection and add the tracks to 
 
 3. Enter the ID of the Discogs collection you want to scrape.
 
-4. The script will print the albums and their tracks in the terminal for verification before adding them to the playlist.
+4. The script will log the progress of scraping albums and tracks from Discogs, searching for tracks on Spotify, and adding them to the playlist.
 
-5. Any albums that do not have songs found on Spotify will be logged to `missing_albums.txt` for manual addition later.
+5. The tracks from the selected collection will be added to a Spotify playlist. If the playlist already contains the tracks, it will be updated accordingly.
 
-6. The tracks from the selected collection will be added to a Spotify playlist. If the playlist already contains the tracks, it will be updated accordingly.
+## Logging
+
+The script uses logging to provide detailed information about its progress. This includes:
+- Authentication steps for Discogs and Spotify.
+- The selected collection ID.
+- Each album and track scraped from Discogs.
+- Each track processed and searched on Spotify.
+- The final update of the Spotify playlist with the number of tracks added.
+
+This logging information will be printed to the terminal, allowing you to monitor the progress and identify any issues that may arise during execution.

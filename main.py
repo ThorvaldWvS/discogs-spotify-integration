@@ -3,6 +3,7 @@ import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 import os
 from dotenv import load_dotenv
+import logging
 
 # Load environment variables from the specified .env file
 load_dotenv(dotenv_path='credentials.env')
@@ -16,6 +17,9 @@ print(f"DISCOGS_USER_TOKEN: {DISCOGS_USER_TOKEN}")
 print(f"SPOTIPY_CLIENT_ID: {SPOTIPY_CLIENT_ID}")
 print(f"SPOTIPY_CLIENT_SECRET: {SPOTIPY_CLIENT_SECRET}")
 print(f"SPOTIPY_REDIRECT_URI: {SPOTIPY_REDIRECT_URI}")
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def authenticate_discogs():
     headers = {
@@ -38,7 +42,7 @@ def authenticate_spotify():
         sp = spotipy.Spotify(auth=token_info['access_token'])
         return sp
     except Exception as e:
-        print(f"Error authenticating with Spotify: {e}")
+        logging.error(f"Error authenticating with Spotify: {e}")
         exit(1)
 
 def get_discogs_collections(headers, username):
@@ -53,15 +57,30 @@ def scrape_discogs_collection(headers, collection_id, username):
     response = requests.get(url, headers=headers)
     if response.status_code != 200:
         raise Exception('Error fetching Discogs collection')
-    return response.json()
-
-def get_album_tracks(sp, album_id):
-    results = sp.album_tracks(album_id)
-    tracks = results['items']
-    while results['next']:
-        results = sp.next(results)
-        tracks.extend(results['items'])
+    
+    collection = response.json()
+    tracks = []
+    for item in collection['releases']:
+        album_id = item['id']
+        album_url = f'https://api.discogs.com/releases/{album_id}'
+        album_response = requests.get(album_url, headers=headers)
+        if album_response.status_code != 200:
+            continue
+        album_data = album_response.json()
+        for track in album_data['tracklist']:
+            tracks.append({
+                'title': track['title'],
+                'artist': item['basic_information']['artists'][0]['name']
+            })
+        logging.info(f"Scraped album: {item['basic_information']['title']} by {item['basic_information']['artists'][0]['name']}")
     return tracks
+
+def search_spotify_track(sp, track_title, artist_name):
+    query = f"track:{track_title} artist:{artist_name}"
+    results = sp.search(q=query, type='track')
+    if results['tracks']['items']:
+        return results['tracks']['items'][0]['id']
+    return None
 
 def create_or_update_spotify_playlist(sp, user_id, playlist_name, tracks):
     playlists = sp.user_playlists(user_id)
@@ -82,65 +101,31 @@ def create_or_update_spotify_playlist(sp, user_id, playlist_name, tracks):
 def main():
     username = input("Enter your Discogs username: ")
     headers = authenticate_discogs()
+    sp = authenticate_spotify()
     
-    try:
-        collections = get_discogs_collections(headers, username)
-        print("Available collections:")
-        for collection in collections['folders']:
-            print(f"{collection['id']}: {collection['name']} ({collection['count']} items)")
-    except Exception as e:
-        print(f"Error fetching Discogs collections: {e}")
-        exit(1)
-
-    collection_id = input("Enter the ID of the Discogs collection to scrape: ")
+    collections = get_discogs_collections(headers, username)
     
-    try:
-        sp = authenticate_spotify()
-        user_id = sp.current_user()['id']
-    except Exception as e:
-        print(f"Error fetching Spotify user information: {e}")
-        exit(1)
+    print("Available collections:")
+    for collection in collections['folders']:
+        print(f"{collection['id']}: {collection['name']}")
     
-    try:
-        collection = scrape_discogs_collection(headers, collection_id, username)
-    except Exception as e:
-        print(f"Error fetching Discogs collection: {e}")
-        exit(1)
+    collection_id = input("Enter the ID of the collection to scrape: ")
+    logging.info(f"Selected collection ID: {collection_id}")
     
-    tracks = []
-    missing_albums = []
-    for item in collection['releases']:
-        album_name = item['basic_information']['title']
-        artist_name = item['basic_information']['artists'][0]['name']
-        print(f"Album: {album_name} by {artist_name}")
-        try:
-            results = sp.search(q=f"album:{album_name} artist:{artist_name}", type='album')
-            if results['albums']['items']:
-                album_id = results['albums']['items'][0]['id']
-                album_tracks = get_album_tracks(sp, album_id)
-                if album_tracks:
-                    for track in album_tracks:
-                        print(f"  Track: {track['name']}")
-                        tracks.append(track['id'])
-                else:
-                    missing_albums.append(f"{album_name} by {artist_name}")
-            else:
-                missing_albums.append(f"{album_name} by {artist_name}")
-        except Exception as e:
-            print(f"Error searching for album '{album_name}' on Spotify: {e}")
-            missing_albums.append(f"{album_name} by {artist_name}")
+    discogs_tracks = scrape_discogs_collection(headers, collection_id, username)
+    logging.info(f"Total tracks scraped from Discogs: {len(discogs_tracks)}")
     
-    try:
-        create_or_update_spotify_playlist(sp, user_id, 'Discogs Collection', tracks)
-        print("Playlist created/updated successfully")
-    except Exception as e:
-        print(f"Error creating/updating Spotify playlist: {e}")
-
-    # Log missing albums to a file
-    with open('missing_albums.txt', 'w') as f:
-        for album in missing_albums:
-            f.write(f"{album}\n")
-        print("Missing albums have been logged to missing_albums.txt")
+    spotify_tracks = []
+    for track in discogs_tracks:
+        track_id = search_spotify_track(sp, track['title'], track['artist'])
+        if track_id:
+            spotify_tracks.append(track_id)
+        logging.info(f"Processed track: {track['title']} by {track['artist']}")
+    
+    user_id = sp.current_user()['id']
+    playlist_name = input("Enter the name of the Spotify playlist: ")
+    create_or_update_spotify_playlist(sp, user_id, playlist_name, spotify_tracks)
+    logging.info(f"Playlist '{playlist_name}' updated with {len(spotify_tracks)} tracks")
 
 if __name__ == "__main__":
     main()
